@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>幸輝のスペース</title>
+    <style>
+        body {
+            background: url('background.jpg') no-repeat center center fixed;
+            background-size: cover;
+            color: white (249, 243, 243);
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        header {
+            font-size: 28px;
+            padding: 20px;
+            border-bottom: 3px solid #FFD700;
+            animation: fadeIn 1.5s ease-in-out;
+        }
+        .content {
+            margin: 20px;
+            padding: 20px;
+            background-color: rgba(34, 34, 34, 0.8);
+            border-radius: 10px;
+        }
+        .highlight {
+            color: #FFD700;
+            font-weight: bold;
+        }
+        .user-input {
+            margin-top: 20px;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        #messages {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @media (max-width: 600px) {
+            body { font-size: 14px; }
+            header { font-size: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Let's listien and Know my music!
+        </h1>
+    </header>
+    <div class="content">
+        <p>🎧<span style="color: white;"> 好きな音楽:</span> <span class="highlight">HIP-HOP R&B</span></p>
+        <p>📖 最近学んでいること: HTML & 英語</p>
+        <p>❤　3house, JP THE WAVY,</p>
+    </div>
+    <div class="user-input">
+        <input type="text" id="message" placeholder="メッセージを入力">
+        <button onclick="postMessage()">投稿</button>
+    </div>
+    <div id="messages"></div>
+
+    <iframe src="" width="300" height="380" frameborder="0"></iframe>
+
+    <script>
+        function postMessage() {
+            let msg = document.getElementById("message").value;
+            if (msg.trim() !== "") {
+                let newMsg = document.createElement("p");
+                newMsg.innerHTML = "💬 " + msg;
+                document.getElementById("messages").appendChild(newMsg);
+                document.getElementById("message").value = ""; // 入力欄をクリア
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+
+
