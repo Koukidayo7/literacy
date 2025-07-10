@@ -1,36 +1,68 @@
+
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>YouTube 動的検索＆同期再生チャット</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- PeerJS -->
+  <title>Free YouTube Sync & Voice Chat</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  
+  <!-- PeerJS for WebRTC -->
   <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
   <!-- Socket.io -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <!-- YouTube IFrame API -->
   <script src="https://www.youtube.com/iframe_api"></script>
+
   <style>
-    * { box-sizing:border-box; margin:0; padding:0; }
+    * { box-sizing:border-box; margin:0; padding:0 }
     body { display:flex; height:100vh; font-family:sans-serif; }
-    #sidebar { width:300px; background:#1f1f1f; color:#eee; padding:1rem; overflow-y:auto; }
+    #sidebar {
+      width:300px; background:#2c2c2c; color:#eee;
+      padding:1rem; overflow-y:auto;
+    }
+    #sidebar h2 { margin-bottom:.5rem; font-size:1.1rem }
+    #sidebar input, #sidebar button {
+      width:100%; padding:.5rem; margin-bottom:.5rem;
+      border:none; border-radius:4px;
+    }
+    #chat {
+      height:150px; overflow-y:auto;
+      background:#111; color:#0f0; padding:.5rem;
+      font-family:monospace; font-size:.9rem;
+    }
     #main { flex:1; display:flex; flex-direction:column; }
-    h2 { margin-bottom:.5rem; font-size:1.2rem; }
-    input, button { width:100%; padding:.5rem; margin-bottom:.5rem; }
-    #chat { height:120px; overflow-y:auto; background:#fff; color:#000; padding:.5rem; }
-    #search-panel { padding:.5rem; background:#fafafa; }
-    #results { max-height:200px; overflow-y:auto; }
-    .video-item { display:flex; align-items:center; padding:.5rem; border-bottom:1px solid #ddd; cursor:pointer; }
-    .video-item img { width:80px; height:45px; margin-right:.5rem; }
-    #player-container { flex:1; background:#000; position:relative; }
-    #player { width:100%; height:100%; }
-    #controls { padding:.5rem; background:#222; display:flex; }
-    #controls button { margin-right:.5rem; }
+    #search-panel {
+      background:#fafafa; padding:.5rem;
+      display:flex; align-items:center;
+    }
+    #search-panel input { flex:1; margin-right:.5rem; }
+    #results {
+      max-height:200px; overflow-y:auto;
+      background:#fff; border-bottom:1px solid #ddd;
+    }
+    .video-item {
+      display:flex; align-items:center; padding:.5rem;
+      border-top:1px solid #ddd; cursor:pointer;
+    }
+    .video-item img { width:80px; height:45px; margin-right:.5rem }
+    .video-item:hover { background:#eef }
+    #player-container { flex:1; background:#000; position:relative }
+    #player { width:100%; height:100% }
+    #controls {
+      display:flex; padding:.5rem; background:#222;
+    }
+    #controls button {
+      margin-right:.5rem; padding:.5rem 1rem;
+      border:none; border-radius:4px; color:#fff;
+      background:#444; cursor:pointer;
+    }
+    #controls button:hover { background:#666 }
   </style>
 </head>
 <body>
 
-  <!-- サイドバー：通話＋チャット -->
+  <!-- サイドバー：通話設定＋チャット -->
   <div id="sidebar">
     <h2>通話設定</h2>
     <input id="my-id" placeholder="Your Peer ID" readonly>
@@ -43,13 +75,13 @@
     <button id="send-chat">送信</button>
   </div>
 
-  <!-- メイン：検索→結果→プレイヤー -->
+  <!-- メイン：検索 → 結果 → プレイヤー → コントロール -->
   <div id="main">
     <div id="search-panel">
-      <input id="yt-search" placeholder="YouTube を検索…">
+      <input id="yt-search" placeholder="YouTube をキーワード検索…">
       <button id="search-btn">検索</button>
-      <div id="results"></div>
     </div>
+    <div id="results"></div>
     <div id="player-container">
       <div id="player"></div>
     </div>
@@ -62,157 +94,182 @@
   </div>
 
   <script>
-    //----------------------------------------
-    // 環境設定
-    const SOCKET_SERVER = 'https://your-server.com';    // Socket.io/PeerJS host
-    const YT_API_KEY    = 'YOUR_YOUTUBE_DATA_API_KEY';  // 取得した API キー
-    //----------------------------------------
+  //――――――――――――――――――――――――――
+  // 環境設定
+  const SOCKET_SERVER = 'https://your-server.com';
+  const INVIDIOUS_INSTANCES = [
+    'https://yewtu.be',
+    'https://yewtu.cafe',
+    'https://vid.puffyan.us'
+  ];
+  //――――――――――――――――――――――――――
 
-    // Socket.io 初期化
-    const socket = io(SOCKET_SERVER);
+  // Socket.io 初期化
+  const socket = io(SOCKET_SERVER);
 
-    // PeerJS 初期化
-    const peer = new Peer(undefined, {
-      host: 'your-server.com',
-      port: 443,
-      path: '/peerjs'
+  // PeerJS 初期化
+  const peer = new Peer(undefined, {
+    host: 'your-server.com', port: 443, path: '/peerjs'
+  });
+  let localStream, currentCall;
+
+  peer.on('open', id => {
+    document.getElementById('my-id').value = id;
+  });
+
+  peer.on('call', call => {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        localStream = stream;
+        call.answer(stream);
+        call.on('stream', playRemoteAudio);
+        currentCall = call;
+      }).catch(console.error);
+  });
+
+  document.getElementById('call-btn').onclick = () => {
+    const peerId = document.getElementById('peer-id').value.trim();
+    if (!peerId) return alert('相手の Peer ID を入力してください');
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        localStream = stream;
+        const call = peer.call(peerId, stream);
+        call.on('stream', playRemoteAudio);
+        currentCall = call;
+      }).catch(console.error);
+  };
+
+  function playRemoteAudio(remoteStream) {
+    const audio = new Audio();
+    audio.srcObject = remoteStream;
+    audio.play();
+  }
+
+  // チャット機能
+  document.getElementById('send-chat').onclick = () => {
+    const txt = document.getElementById('chat-input').value.trim();
+    if (!txt) return;
+    socket.emit('chat', txt);
+    appendChat(`自分: ${txt}`);
+    document.getElementById('chat-input').value = '';
+  };
+  socket.on('chat', msg => appendChat(`相手: ${msg}`));
+  function appendChat(msg) {
+    const c = document.getElementById('chat');
+    const div = document.createElement('div');
+    div.textContent = msg;
+    c.append(div);
+    c.scrollTop = c.scrollHeight;
+  }
+
+  // YouTube IFrame 初期化
+  let ytPlayer;
+  function onYouTubeIframeAPIReady() {
+    ytPlayer = new YT.Player('player', {
+      height: '100%', width: '100%', videoId: '',
+      playerVars: { autoplay:0, controls:0 },
+      events: { onStateChange: onStateChange }
     });
-    let localStream, currentCall;
+  }
+  function onStateChange(e) {
+    const state = e.data, t = ytPlayer.getCurrentTime();
+    if (state === YT.PlayerState.PLAYING)  socket.emit('yt-sync', { action:'play',  time:t });
+    if (state === YT.PlayerState.PAUSED)   socket.emit('yt-sync', { action:'pause', time:t });
+  }
 
-    peer.on('open', id => {
-      document.getElementById('my-id').value = id;
-    });
+  // 再生コントロール
+  document.getElementById('play-btn').onclick  = () => {
+    const t = ytPlayer.getCurrentTime();
+    ytPlayer.playVideo();
+    socket.emit('yt-sync', { action:'play', time:t });
+  };
+  document.getElementById('pause-btn').onclick = () => {
+    const t = ytPlayer.getCurrentTime();
+    ytPlayer.pauseVideo();
+    socket.emit('yt-sync', { action:'pause', time:t });
+  };
+  document.getElementById('seek-back').onclick = () => {
+    const t = Math.max(0, ytPlayer.getCurrentTime() - 10);
+    ytPlayer.seekTo(t, true);
+    socket.emit('yt-sync', { action:'seek', time:t });
+  };
+  document.getElementById('seek-fwd').onclick = () => {
+    const t = ytPlayer.getCurrentTime() + 10;
+    ytPlayer.seekTo(t, true);
+    socket.emit('yt-sync', { action:'seek', time:t });
+  };
 
-    peer.on('call', call => {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(s => {
-          localStream = s;
-          call.answer(s);
-          call.on('stream', playRemoteAudio);
-          currentCall = call;
-        });
-    });
+  // 動的検索
+  document.getElementById('search-btn').onclick = doSearch;
+  document.getElementById('yt-search').addEventListener('keyup', e => {
+    if (e.key === 'Enter') doSearch();
+  });
 
-    document.getElementById('call-btn').onclick = () => {
-      const peerId = document.getElementById('peer-id').value.trim();
-      if (!peerId) return alert('相手の Peer ID を入力してください');
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(s => {
-          localStream = s;
-          const call = peer.call(peerId, s);
-          call.on('stream', playRemoteAudio);
-          currentCall = call;
-        });
-    };
+  async function doSearch() {
+    const q = document.getElementById('yt-search').value.trim();
+    if (!q) return;
+    showResults(await searchYouTubeNoKey(q));
+  }
 
-    function playRemoteAudio(remoteStream) {
-      const audio = new Audio();
-      audio.srcObject = remoteStream;
-      audio.play();
-    }
-
-    // チャット機能
-    document.getElementById('send-chat').onclick = () => {
-      const txt = document.getElementById('chat-input').value.trim();
-      if (!txt) return;
-      socket.emit('chat', txt);
-      appendChat(`自分: ${txt}`);
-      document.getElementById('chat-input').value = '';
-    };
-    socket.on('chat', msg => appendChat(`相手: ${msg}`));
-    function appendChat(msg) {
-      const div = document.createElement('div');
-      div.textContent = msg;
-      document.getElementById('chat').append(div);
-      document.getElementById('chat').scrollTop = 1e9;
-    }
-
-    // YouTube IFrame 初期化
-    let ytPlayer;
-    function onYouTubeIframeAPIReady() {
-      ytPlayer = new YT.Player('player', {
-        height: '100%',
-        width: '100%',
-        videoId: '',
-        playerVars: { autoplay:0, controls:0 },
-        events: { onStateChange: onPlayerStateChange }
-      });
-    }
-    function onPlayerStateChange(e) {
-      const st = e.data, t = ytPlayer.getCurrentTime();
-      if (st === YT.PlayerState.PLAYING) socket.emit('yt-sync', { action:'play', time:t });
-      if (st === YT.PlayerState.PAUSED ) socket.emit('yt-sync', { action:'pause', time:t });
-    }
-
-    // 再生コントロール
-    document.getElementById('play-btn').onclick = () => {
-      const t = ytPlayer.getCurrentTime();
-      ytPlayer.playVideo();
-      socket.emit('yt-sync', { action:'play', time:t });
-    };
-    document.getElementById('pause-btn').onclick = () => {
-      const t = ytPlayer.getCurrentTime();
-      ytPlayer.pauseVideo();
-      socket.emit('yt-sync', { action:'pause', time:t });
-    };
-    document.getElementById('seek-back').onclick = () => {
-      const t = Math.max(0, ytPlayer.getCurrentTime() - 10);
-      ytPlayer.seekTo(t, true);
-      socket.emit('yt-sync', { action:'seek', time:t });
-    };
-    document.getElementById('seek-fwd').onclick = () => {
-      const t = ytPlayer.getCurrentTime() + 10;
-      ytPlayer.seekTo(t, true);
-      socket.emit('yt-sync', { action:'seek', time:t });
-    };
-
-    // 動的検索＋結果表示
-    document.getElementById('search-btn').onclick = searchYouTube;
-    document.getElementById('yt-search').addEventListener('keyup', e => {
-      if (e.key === 'Enter') searchYouTube();
-    });
-
-    function searchYouTube() {
-      const q = document.getElementById('yt-search').value.trim();
-      if (!q) return;
-      fetch(`https://www.googleapis.com/youtube/v3/search?key=${YT_API_KEY}&part=snippet&type=video&maxResults=10&q=${encodeURIComponent(q)}`)
-        .then(res => res.json())
-        .then(json => {
-          const container = document.getElementById('results');
-          container.innerHTML = '';
-          json.items.forEach(item => {
-            const vid = item.id.videoId;
-            const div = document.createElement('div');
-            div.className = 'video-item';
-            div.innerHTML = `<img src="${item.snippet.thumbnails.default.url}"><div>${item.snippet.title}</div>`;
-            div.onclick = () => {
-              ytPlayer.loadVideoById(vid, 0);
-              socket.emit('yt-sync', { action:'load', videoId: vid });
-            };
-            container.append(div);
-          });
-        })
-        .catch(err => console.error(err));
-    }
-
-    // 同期イベント受信
-    socket.on('yt-sync', data => {
-      switch (data.action) {
-        case 'load':
-          ytPlayer.loadVideoById(data.videoId, 0); break;
-        case 'play':
-          ytPlayer.seekTo(data.time, true);
-          ytPlayer.playVideo();
-          break;
-        case 'pause':
-          ytPlayer.seekTo(data.time, true);
-          ytPlayer.pauseVideo();
-          break;
-        case 'seek':
-          ytPlayer.seekTo(data.time, true);
-          break;
+  // Invidious フォールバック検索
+  async function searchYouTubeNoKey(query) {
+    let lastErr;
+    for (const host of INVIDIOUS_INSTANCES) {
+      const url = `${host}/api/v1/search?fields=videoId,title,videoThumbnails&search_query=${encodeURIComponent(query)}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(res.statusText);
+        return await res.json();
+      } catch (err) {
+        lastErr = err;
+        continue;
       }
+    }
+    throw new Error(`全インスタンスで失敗: ${lastErr.message}`);
+  }
+
+  // 検索結果をDOMに反映
+  function showResults(items) {
+    const container = document.getElementById('results');
+    container.innerHTML = '';
+    items.forEach(item => {
+      const vid   = item.videoId;
+      const thumb = item.videoThumbnails[0]?.url;
+      const div   = document.createElement('div');
+      div.className = 'video-item';
+      div.innerHTML = `
+        <img src="${thumb}" alt="thumb">
+        <div>${item.title}</div>
+      `;
+      div.onclick = () => {
+        ytPlayer.loadVideoById(vid, 0);
+        socket.emit('yt-sync', { action:'load', videoId: vid });
+      };
+      container.append(div);
     });
+  }
+
+  // 同期イベント受信
+  socket.on('yt-sync', data => {
+    switch (data.action) {
+      case 'load':
+        ytPlayer.loadVideoById(data.videoId, 0);
+        break;
+      case 'play':
+        ytPlayer.seekTo(data.time, true);
+        ytPlayer.playVideo();
+        break;
+      case 'pause':
+        ytPlayer.seekTo(data.time, true);
+        ytPlayer.pauseVideo();
+        break;
+      case 'seek':
+        ytPlayer.seekTo(data.time, true);
+        break;
+    }
+  });
   </script>
 </body>
 </html>
+
+
